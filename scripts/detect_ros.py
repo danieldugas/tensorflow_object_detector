@@ -21,6 +21,7 @@ from std_msgs.msg import String , Header
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
+from darknet_ros_msgs.msg import BoundingBox, BoundingBoxes
 
 # Object detection module imports
 import object_detection
@@ -31,7 +32,7 @@ from object_detection.utils import visualization_utils as vis_util
 GPU_FRACTION = 0.4
 
 ######### Set model here ############
-MODEL_NAME =  'ssd_mobilenet_v1_coco_11_06_2017'
+MODEL_NAME =  'ssd_mobilenet_v2_coco_2018_03_29'
 # By default models are stored in data/models/
 MODEL_PATH = os.path.join(os.path.dirname(sys.path[0]),'data','models' , MODEL_NAME)
 # Path to frozen detection graph. This is the actual model that is used for the object detection.
@@ -70,6 +71,7 @@ class Detector:
     def __init__(self):
         self.image_pub = rospy.Publisher("debug_image",Image, queue_size=1)
         self.object_pub = rospy.Publisher("objects", Detection2DArray, queue_size=1)
+        self.bb_pub = rospy.Publisher("/mobilenet/bounding_boxes", BoundingBoxes, queue_size=1)
         self.bridge = CvBridge()
         self.image_sub = rospy.Subscriber("image", Image, self.image_cb, queue_size=1, buff_size=2**24)
         self.sess = tf.Session(graph=detection_graph,config=config)
@@ -118,6 +120,16 @@ class Detector:
 
         self.object_pub.publish(objArray)
 
+        # Adding bounding boxes for frame_soft
+        boundingBoxes = BoundingBoxes()
+        boundingBoxes.header = data.header
+        boundingBoxes.image_header = data.header
+        boundingBoxes.bounding_boxes = []
+
+        for i in range(len(objects)):
+            boundingBoxes.bounding_boxes.append(self.object_bbox(objects[i],data.header,image_np,cv_image))
+        self.bb_pub.publish(boundingBoxes)
+
         img=cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
         image_out = Image()
         try:
@@ -146,6 +158,23 @@ class Detector:
         obj.bbox.center.y = int((dimensions[0] + dimensions[2])*image_width/2)
 
         return obj
+
+    def object_bbox(self,object_data, header, image_np,image):
+        bbox = BoundingBox()
+        image_height,image_width,channels = image.shape
+
+        object_id=object_data[0]
+        object_score=object_data[1]
+        dimensions=object_data[2]
+
+        bbox.Class = str(object_id)
+        bbox.probability = object_score
+        bbox.xmin = int(dimensions[1]*image_width)
+        bbox.ymin = int(dimensions[0]*image_width)
+        bbox.xmax = int(dimensions[3]*image_width)
+        bbox.ymax = int(dimensions[2]*image_width)
+
+        return bbox
 
 def main(args):
     rospy.init_node('detector_node')
