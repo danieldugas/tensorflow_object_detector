@@ -7,6 +7,7 @@ import os
 import sys
 import cv2
 import numpy as np
+import message_filters
 try:
     import tensorflow as tf
 except ImportError:
@@ -72,11 +73,18 @@ class Detector:
         self.image_pub = rospy.Publisher("debug_image",Image, queue_size=1)
         self.object_pub = rospy.Publisher("objects", Detection2DArray, queue_size=1)
         self.bb_pub = rospy.Publisher("/mobilenet/bounding_boxes", BoundingBoxes, queue_size=1)
+        self.depth_pub = rospy.Publisher("/mobilenet/corresponding_depth", Image, queue_size=1)
         self.bridge = CvBridge()
-        self.image_sub = rospy.Subscriber("image", Image, self.image_cb, queue_size=1, buff_size=2**24)
+#         self.image_sub = rospy.Subscriber("image", Image, self.image_cb, queue_size=1, buff_size=2**24)
         self.sess = tf.Session(graph=detection_graph,config=config)
+        # synchronized callback
+        image_sub = message_filters.Subscriber('image', Image)
+        depth_sub = message_filters.Subscriber('depth', Image)
+        ts = message_filters.TimeSynchronizer([image_sub, depth_sub], 1)
+#         ts = message_filters.ApproximateTimeSynchronizer([image_sub, depth_sub], 10, 0.1, allow_headerless=True)
+        ts.registerCallback(self.image_cb)
 
-    def image_cb(self, data):
+    def image_cb(self, data, depth):
         objArray = Detection2DArray()
         try:
             cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
@@ -129,6 +137,7 @@ class Detector:
         for i in range(len(objects)):
             boundingBoxes.bounding_boxes.append(self.object_bbox(objects[i],data.header,image_np,cv_image))
         self.bb_pub.publish(boundingBoxes)
+        self.depth_pub.publish(depth)
 
         img=cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
         image_out = Image()
@@ -169,10 +178,10 @@ class Detector:
 
         bbox.Class = str(object_id)
         bbox.probability = object_score
+        bbox.ymin = int(dimensions[0]*image_height)
         bbox.xmin = int(dimensions[1]*image_width)
-        bbox.ymin = int(dimensions[0]*image_width)
+        bbox.ymax = int(dimensions[2]*image_height)
         bbox.xmax = int(dimensions[3]*image_width)
-        bbox.ymax = int(dimensions[2]*image_width)
 
         return bbox
 
